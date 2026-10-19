@@ -12,6 +12,7 @@ import { useSorokit } from "@/context/useSorokit";
 import { type NetworkInfo, type TxResult } from "@/lib/client";
 import {
   cn,
+  friendlyError,
   truncateAddress,
   truncateToUtf8ByteLength,
   utf8ByteLength,
@@ -185,9 +186,10 @@ export function TransactionPanel({
       });
       if (signal.aborted) return;
       if (err) {
-        setError(err);
+        const message = friendlyError(err);
+        setError(message);
         setState("error");
-        onError?.(err);
+        onError?.(message);
         return;
       }
       setResult(data);
@@ -201,9 +203,10 @@ export function TransactionPanel({
     } catch (e) {
       if (!signal.aborted) {
         const msg = e instanceof Error ? e.message : "Unknown error";
-        setError(msg);
+        const message = friendlyError(msg);
+        setError(message);
         setState("error");
-        onError?.(msg);
+        onError?.(message);
       }
     } finally {
       setPreview(null);
@@ -409,17 +412,10 @@ export function TransactionPanel({
               step="0.0000001"
               value={amount}
               onChange={(e) => {
-                const val = e.target.value;
-                if (val.includes(".")) {
-                  const parts = val.split(".");
-                  if (parts[1].length > decimals) {
-                    setAmount(parts[0] + "." + parts[1].slice(0, decimals));
-                  } else {
-                    setAmount(val);
-                  }
-                } else {
-                  setAmount(val);
-                }
+                // Keep exactly what the user typed: truncating here would make
+                // `exceedsDecimals` unreachable, so an 8th decimal would be silently
+                // dropped instead of surfacing the error below.
+                setAmount(e.target.value);
                 setAmountDirty(true);
               }}
               hint={
@@ -428,15 +424,18 @@ export function TransactionPanel({
                   : undefined
               }
               error={
+                // A sub-minimum amount can only be written with more decimal
+                // places than the asset allows, so the minimum check is reported
+                // first: it is the constraint the user has to act on.
                 amountDirty
                   ? amount.trim() === ""
                     ? "Amount is required"
                     : isNaN(parsedAmount) || parsedAmount <= 0
                       ? "Amount must be greater than 0"
-                      : exceedsDecimals
-                        ? `Amount cannot exceed ${decimals} decimal places`
-                        : parsedAmount < 0.0000001
-                          ? "Minimum amount is 0.0000001 XLM"
+                      : parsedAmount < 0.0000001
+                        ? "Minimum amount is 0.0000001 XLM"
+                        : exceedsDecimals
+                          ? `Amount cannot exceed ${decimals} decimal places`
                           : !hasSufficientBalance
                             ? isSendingXlm && estimatedFeeXlm > 0
                               ? "Insufficient balance (amount + network fee exceeds available balance)"
